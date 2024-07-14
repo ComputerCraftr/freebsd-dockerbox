@@ -257,13 +257,7 @@ check_vmm() {
 }
 
 get_vm_manager_pid() {
-    local _pid
-    _pid="$(${PGREP} -fx "daemon: ${VM_MANAGER_DAEMON_ID}\[[0-9]*\]" || true)"
-    if [ -z "${_pid}" ]; then
-        log error "Failed to get VM manager PID"
-        return 1
-    fi
-    echo "${_pid}"
+    ${PGREP} -fx "daemon: ${VM_MANAGER_DAEMON_ID}\[[0-9]*\]"
 }
 
 vm_manager() {
@@ -312,10 +306,7 @@ dockerbox_start() {
     local _run_console="${1:-}"
     local _pid
 
-    _pid="$(get_vm_manager_pid)" || {
-        log error "Failed to start dockerbox: Could not get VM manager PID"
-        exit 1
-    }
+    _pid="$(get_vm_manager_pid || true)"
 
     if [ -n "${_pid}" ]; then
         log warn "Guest is already run by PID ${_pid}, left intact"
@@ -333,10 +324,7 @@ dockerbox_start() {
 
 dockerbox_stop() {
     local _pid
-    _pid="$(get_vm_manager_pid)" || {
-        log error "Failed to stop dockerbox: Could not get VM manager PID"
-        exit 1
-    }
+    _pid="$(get_vm_manager_pid || true)"
 
     if [ -n "${_pid}" ]; then
         log info "Stopping guest ${DOCKERBOX_VM}, managed by PID ${_pid}"
@@ -376,10 +364,7 @@ dockerbox_status() {
 
     log info "Begin: dockerbox status"
 
-    _pid="$(get_vm_manager_pid)" || {
-        log error "Failed to get dockerbox status: Could not get VM manager PID"
-        exit 1
-    }
+    _pid="$(get_vm_manager_pid || true)"
 
     if [ -n "${_pid}" ]; then
         output "dockerbox is running as pid ${_pid}"
