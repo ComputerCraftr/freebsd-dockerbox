@@ -1,5 +1,8 @@
 #!/bin/sh
 
+# Exit on errors and undefined variables
+set -eu
+
 GUEST_ROOT=/usr/local/share/dockerbox
 CONF_DIR=/usr/local/etc/dockerbox
 
@@ -54,7 +57,7 @@ log() {
 
     _level="$(${ECHO} $_level | tr "[:lower:]" "[:upper:]")"
     _timestamp="$(date +'%FT%H:%M:%S%z')"
-    ${ECHO} "${_timestamp} ${_level} ${_message}" >> ${DOCKERBOX_LOG}
+    ${ECHO} "${_timestamp} ${_level} ${_message}" >>${DOCKERBOX_LOG}
 }
 
 output() {
@@ -81,8 +84,8 @@ check_configuration() {
     local _file="$1"
 
     if [ ! -f "${_file}" ]; then
-    	log error "${_file} is missing, please create it from the sample"
-	    exit 3
+        log error "${_file} is missing, please create it from the sample"
+        exit 3
     fi
 }
 
@@ -131,20 +134,20 @@ nat_count() {
     local _nat_keyword="$1"
     local _ext_if="$2"
     log debug "assert NAT loaded: nat_if=${_nat_keyword} ext_if=${_ext_if}"
-    ${PFCTL} -s nat | grep nat | grep ${_nat_keyword} | grep ${_ext_if} -c
+    ${PFCTL} -s nat | ${GREP} nat | ${GREP} ${_nat_keyword} | ${GREP} ${_ext_if} -c
 }
 
 check_pf() {
     assert_kmod_loaded "pf" "${PF_KO}"
 
-    if [ ! $(${PFCTL} -s Running) == "Enabled" ]; then
+    if [ "$(${PFCTL} -s Running)" != "Enabled" ]; then
         log info "Enabling PF"
         ${PFCTL} -e
     fi
 
     if [ ! -f "${PF_CONF}" ]; then
-	    log warn "No pf configuration found"
-	    log info "Creating empty pf configuration ${PF_CONF}"
+        log warn "No pf configuration found"
+        log info "Creating empty pf configuration ${PF_CONF}"
         ${TOUCH} ${PF_CONF}
     fi
     check_configuration ${CONFIG}
@@ -157,18 +160,18 @@ check_pf() {
 
     nat_keyword="$(echo ${nat_ip} | cut -d'.' -f1-3).0/${nat_mask}"
 
-    if [ $(nat_count ${nat_keyword} ${ext_if}) -lt 1 ]; then
+    if [ "$(nat_count ${nat_keyword} ${ext_if})" -lt 1 ]; then
         log warn "No pf NAT set up"
-        if [ $(check_ext_if) -lt 1 ]; then
+        if [ "$(check_ext_if)" -lt 1 ]; then
             log warn "External interface specified in settings not available"
         else
             log info "Writing NAT rule into ${PF_CONF}"
-            ${ECHO} "nat on ${ext_if} inet from ${nat_keyword} to any -> (${ext_if})" >> ${PF_CONF}
-	        log info "Loading pf conf ${PF_CONF}"
-            ${PFCTL} -f ${PF_CONF} 
-	        if [ $(nat_count ${nat_keyword} ${ext_if}) -lt 1 ]; then
-		        log warn "Failed to load pf NAT with ${PF_CONF}"
-	        fi
+            ${ECHO} "nat on ${ext_if} inet from ${nat_keyword} to any -> (${ext_if})" >>${PF_CONF}
+            log info "Loading pf conf ${PF_CONF}"
+            ${PFCTL} -f ${PF_CONF}
+            if [ "$(nat_count ${nat_keyword} ${ext_if})" -lt 1 ]; then
+                log warn "Failed to load pf NAT with ${PF_CONF}"
+            fi
         fi
     fi
 }
@@ -182,7 +185,7 @@ create_bridge() {
     fi
 
     check_configuration ${CONFIG}
-    
+
     nat_ip="10.0.0.1"
     nat_mask=24
 
@@ -193,14 +196,15 @@ create_bridge() {
 }
 
 destroy_bridge() {
-    if [ has_bridge_interface ]; then
+    if has_bridge_interface; then
         log info "Destroying bridge interface: ${DOCKERBOX_IF}"
         ${IFCONFIG} ${DOCKERBOX_IF} destroy 2>&1 | capture_output debug ifconfig
     fi
 }
 
 create_tap() {
-    local _tap="$(get_tap_interface)"
+    local _tap
+    _tap="$(get_tap_interface)"
 
     if [ -z "${_tap}" ]; then
         _tap="$(${IFCONFIG} tap create up)"
@@ -212,7 +216,8 @@ create_tap() {
 }
 
 destroy_tap() {
-    local _tap="$(get_tap_interface)"
+    local _tap
+    _tap="$(get_tap_interface)"
 
     if [ -n "${_tap}" ]; then
         log info "Destroying linked tap interface: ${_tap}"
@@ -221,9 +226,7 @@ destroy_tap() {
 }
 
 check_nat() {
-    local _tap
-
-    if [ $(sysctl_value net.inet.ip.forwarding) -eq 0 ]; then
+    if [ "$(sysctl_value net.inet.ip.forwarding)" -eq 0 ]; then
         ${SYSCTL} net.inet.ip.forwarding=1 | capture_output debug sysctl
     fi
     create_bridge
@@ -249,7 +252,7 @@ check_vmm() {
             exit 127
         fi
     fi
-    
+
     assert_kmod_loaded "vmm" "${VMM_KO}"
 }
 
@@ -265,7 +268,7 @@ vm_manager() {
     log info "Starting dockerbox"
 
     check_configuration ${CONFIG}
-    
+
     cpu=1
     memory=512M
 
@@ -273,27 +276,27 @@ vm_manager() {
     . ${CONFIG}
 
     check_vmm
-    check_nat 
+    check_nat
 
     if [ ! -f ${DISK_IMAGE} ] || [ ! -f ${DEVICE_MAP} ]; then
-	  	log error "Disk image not installed"
-		log info "Please run 'service dockerbox fetch'"
-		exit 1
-	fi
+        log error "Disk image not installed"
+        log info "Please run 'service dockerbox fetch'"
+        exit 1
+    fi
 
     _tap="$(get_tap_interface)"
     _grub_args="-m ${DEVICE_MAP} -r hd0,msdos2 -M ${memory}"
     _bhyve_args="-A -H -P -s 0:0,hostbridge -s 1:0,lpc -s 2:0,virtio-net,${_tap} -s 3:0,virtio-blk,${DISK_IMAGE} -c ${cpu} -m ${memory}"
-    
-    if [ "$1" == "console" ]; then
+
+    if [ "$1" = "console" ]; then
         _bhyve_args="${_bhyve_args} -l com1,stdio"
         log debug "Grub arguments: ${_grub_args}"
         ${GRUB_BHYVE} ${_grub_args} ${DOCKERBOX_VM}
         log debug "Bhyve arguments: ${_bhyve_args}"
-        ${BHYVE} ${_bhyve_args} ${DOCKERBOX_VM} 
+        ${BHYVE} ${_bhyve_args} ${DOCKERBOX_VM}
     else
         log debug "Grub arguments: ${_grub_args}"
-        ${GRUB_BHYVE} ${_grub_args} ${DOCKERBOX_VM} 2>&1 | capture_output debug grub-bhyve  
+        ${GRUB_BHYVE} ${_grub_args} ${DOCKERBOX_VM} 2>&1 | capture_output debug grub-bhyve
         log debug "Bhyve arguments: ${_bhyve_args}"
         ${BHYVE} ${_bhyve_args} ${DOCKERBOX_VM} 2>&1 | capture_output debug bhyve
     fi
@@ -307,11 +310,11 @@ dockerbox_start() {
     _pid="$(get_vm_manager_pid)"
 
     if [ -n "${_pid}" ]; then
-	    log warn "Guest is already run by PID ${_pid}, left intact"
-	    return 1
+        log warn "Guest is already run by PID ${_pid}, left intact"
+        return 1
     fi
 
-    if [ "${_run_console}" == "console" ]; then
+    if [ "${_run_console}" = "console" ]; then
         log info "dockerbox_start: console mode"
         vm_manager console
     else
@@ -323,13 +326,38 @@ dockerbox_start() {
 dockerbox_stop() {
     local _pid
     _pid="$(get_vm_manager_pid)"
-    log info "Stopping guest ${DOCKERBOX_VM}, managed by PID ${_pid}"
-    ${KILL} -SIGTERM "${_pid}" 2>&1 | capture_output debug kill
-    bhyvectl --destroy --vm=${DOCKERBOX_VM}
-    destroy_tap
-    destroy_bridge
-    ${KILL} -SIGTERM $PPID
-    log info "Dockerbox stopped: killed pid=${_pid} and ppid=${PPID}"
+
+    if [ -n "${_pid}" ]; then
+        log info "Stopping guest ${DOCKERBOX_VM}, managed by PID ${_pid}"
+        ${KILL} -SIGTERM "${_pid}" 2>&1 | capture_output debug kill
+
+        if [ $? -eq 0 ]; then
+            log info "Successfully sent SIGTERM to PID ${_pid}"
+        else
+            log error "Failed to send SIGTERM to PID ${_pid}"
+            exit 1
+        fi
+
+        if command -v bhyvectl >/dev/null 2>&1; then
+            bhyvectl --destroy --vm=${DOCKERBOX_VM}
+            if [ $? -eq 0 ]; then
+                log info "Successfully destroyed VM ${DOCKERBOX_VM}"
+            else
+                log error "Failed to destroy VM ${DOCKERBOX_VM}"
+                exit 1
+            fi
+        else
+            log error "bhyvectl command not found"
+            exit 127
+        fi
+
+        destroy_tap
+        destroy_bridge
+        ${KILL} -SIGTERM "$PPID"
+        log info "Dockerbox stopped: killed pid=${_pid} and ppid=${PPID}"
+    else
+        log warn "No running Dockerbox VM found"
+    fi
 }
 
 dockerbox_status() {
@@ -340,28 +368,28 @@ dockerbox_status() {
     _pid="$(get_vm_manager_pid)"
 
     if [ -n "${_pid}" ]; then
-	    output "dockerbox is running as pid ${_pid}"
+        output "dockerbox is running as pid ${_pid}"
     else
-	    output "dockerbox is not running"
-	    return 1
+        output "dockerbox is not running"
+        return 1
     fi
 
-    log info "End: wifibox status"
+    log info "End: dockerbox status"
 }
 
 dockerbox_fetch() {
-	DISK_IMG_SUM=78512a9e7c61371124db962ee0eceb83a5994a784290c33c25e798a9ea98e480
-	DISKVERSION=0.1.1
-	log debug "Fetch dockerbox disk imgage"
-	fetch -o /tmp https://github.com/leafoliage/freebsd-dockerbox/releases/download/disk-${DISKVERSION}/dockerbox-img-${DISKVERSION}.tar.zstd
-	if [ "$(${SHA256} --quiet /tmp/dockerbox-img-${DISKVERSION}.tar.zstd)" != "${DISK_IMG_SUM}" ]; then
-		${RM} /tmp/dockerbox-img-${DISKVERSION}.tar.zstd
-		log error "Dockerbox image checksum unmatch"
-		exit 1
-	fi
-	${TAR} -C /usr/local/share -xf /tmp/dockerbox-img-${DISKVERSION}.tar.zstd
-	${MV} /usr/local/share/dockerbox-img-${DISKVERSION} /usr/local/share/dockerbox
-	log info "Dockerbox disk image installed to /usr/local/share/dockerbox"
+    DISK_IMG_SUM=78512a9e7c61371124db962ee0eceb83a5994a784290c33c25e798a9ea98e480
+    DISKVERSION=0.1.1
+    log debug "Fetch dockerbox disk imgage"
+    fetch -o /tmp https://github.com/leafoliage/freebsd-dockerbox/releases/download/disk-${DISKVERSION}/dockerbox-img-${DISKVERSION}.tar.zstd
+    if [ "$(${SHA256} --quiet /tmp/dockerbox-img-${DISKVERSION}.tar.zstd)" != "${DISK_IMG_SUM}" ]; then
+        ${RM} /tmp/dockerbox-img-${DISKVERSION}.tar.zstd
+        log error "Dockerbox image checksum unmatch"
+        exit 1
+    fi
+    ${TAR} -C /usr/local/share -xf /tmp/dockerbox-img-${DISKVERSION}.tar.zstd
+    ${MV} /usr/local/share/dockerbox-img-${DISKVERSION} /usr/local/share/dockerbox
+    log info "Dockerbox disk image installed to /usr/local/share/dockerbox"
 }
 
 #[ "$0" != "${SCRIPT}" ] && return 0
@@ -372,11 +400,11 @@ command="$1"
 shift
 
 case ${command} in
-    start) dockerbox_start;;
-    stop) dockerbox_stop;;
-    console) dockerbox_start console;;
-    status) dockerbox_status;;
-    fetch) dockerbox_fetch;;
-    _manage_vm) vm_manager;;
-    *) echo "${help_msg}";;
+start) dockerbox_start ;;
+stop) dockerbox_stop ;;
+console) dockerbox_start console ;;
+status) dockerbox_status ;;
+fetch) dockerbox_fetch ;;
+_manage_vm) vm_manager ;;
+*) echo "${help_msg}" ;;
 esac
