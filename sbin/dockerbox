@@ -288,7 +288,7 @@ vm_manager() {
     _grub_args="-m ${DEVICE_MAP} -r hd0,msdos2 -M ${memory}"
     _bhyve_args="-A -H -P -s 0:0,hostbridge -s 1:0,lpc -s 2:0,virtio-net,${_tap} -s 3:0,virtio-blk,${DISK_IMAGE} -c ${cpu} -m ${memory}"
 
-    if [ "$1" = "console" ]; then
+    if [ "${1:-}" = "console" ]; then
         _bhyve_args="${_bhyve_args} -l com1,stdio"
         log debug "Grub arguments: ${_grub_args}"
         ${GRUB_BHYVE} ${_grub_args} ${DOCKERBOX_VM}
@@ -303,10 +303,9 @@ vm_manager() {
 }
 
 dockerbox_start() {
-    local _run_console
+    local _run_console="${1:-}"
     local _pid
 
-    _run_console="$1"
     _pid="$(get_vm_manager_pid)"
 
     if [ -n "${_pid}" ]; then
@@ -380,7 +379,7 @@ dockerbox_status() {
 dockerbox_fetch() {
     DISK_IMG_SUM=78512a9e7c61371124db962ee0eceb83a5994a784290c33c25e798a9ea98e480
     DISKVERSION=0.1.1
-    log debug "Fetch dockerbox disk imgage"
+    log debug "Fetch dockerbox disk image"
     fetch -o /tmp https://github.com/leafoliage/freebsd-dockerbox/releases/download/disk-${DISKVERSION}/dockerbox-img-${DISKVERSION}.tar.zstd
     if [ "$(${SHA256} --quiet /tmp/dockerbox-img-${DISKVERSION}.tar.zstd)" != "${DISK_IMG_SUM}" ]; then
         ${RM} /tmp/dockerbox-img-${DISKVERSION}.tar.zstd
